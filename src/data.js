@@ -539,6 +539,115 @@ function searchFullText(query, sessions) {
 
 // ── Exports ────────────────────────────────────────────────
 
+// ── Session replay data (with timestamps) ─────────────────
+
+function getSessionReplay(sessionId, project) {
+  const found = findSessionFile(sessionId, project);
+  if (!found) return { messages: [], duration: 0 };
+
+  const messages = [];
+  const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      let role, content, ts;
+
+      if (found.format === 'claude') {
+        if (entry.type !== 'user' && entry.type !== 'assistant') continue;
+        role = entry.type;
+        content = extractContent((entry.message || {}).content);
+        ts = entry.timestamp || '';
+      } else {
+        if (entry.type !== 'response_item' || !entry.payload) continue;
+        role = entry.payload.role;
+        if (role !== 'user' && role !== 'assistant') continue;
+        content = extractContent(entry.payload.content);
+        ts = entry.timestamp || '';
+      }
+
+      if (!content || isSystemMessage(content)) continue;
+
+      messages.push({
+        role,
+        content: content.slice(0, 3000),
+        timestamp: ts,
+        ms: ts ? new Date(ts).getTime() : 0,
+      });
+    } catch {}
+  }
+
+  // Calculate duration
+  const startMs = messages.length > 0 ? messages[0].ms : 0;
+  const endMs = messages.length > 0 ? messages[messages.length - 1].ms : 0;
+
+  return {
+    messages,
+    startMs,
+    endMs,
+    duration: endMs - startMs,
+  };
+}
+
+// ── Cost analytics ────────────────────────────────────────
+
+function getCostAnalytics(sessions) {
+  const byDay = {};
+  const byProject = {};
+  const byWeek = {};
+  let totalCost = 0;
+  let totalTokens = 0;
+  const sessionCosts = [];
+
+  for (const s of sessions) {
+    if (!s.file_size) continue;
+    const tokens = s.file_size / 4;
+    const cost = tokens * 0.000015 * 0.3 + tokens * 0.000075 * 0.7;
+    totalCost += cost;
+    totalTokens += tokens;
+
+    // By day
+    const day = s.date || 'unknown';
+    if (!byDay[day]) byDay[day] = { cost: 0, sessions: 0, tokens: 0 };
+    byDay[day].cost += cost;
+    byDay[day].sessions++;
+    byDay[day].tokens += tokens;
+
+    // By week
+    if (s.date) {
+      const d = new Date(s.date);
+      const weekStart = new Date(d);
+      weekStart.setDate(d.getDate() - d.getDay());
+      const weekKey = weekStart.toISOString().slice(0, 10);
+      if (!byWeek[weekKey]) byWeek[weekKey] = { cost: 0, sessions: 0 };
+      byWeek[weekKey].cost += cost;
+      byWeek[weekKey].sessions++;
+    }
+
+    // By project
+    const proj = s.project_short || s.project || 'unknown';
+    if (!byProject[proj]) byProject[proj] = { cost: 0, sessions: 0, tokens: 0 };
+    byProject[proj].cost += cost;
+    byProject[proj].sessions++;
+    byProject[proj].tokens += tokens;
+
+    sessionCosts.push({ id: s.id, cost, project: proj, date: s.date });
+  }
+
+  // Sort top sessions by cost
+  sessionCosts.sort((a, b) => b.cost - a.cost);
+
+  return {
+    totalCost,
+    totalTokens,
+    totalSessions: sessions.length,
+    byDay,
+    byWeek,
+    byProject,
+    topSessions: sessionCosts.slice(0, 10),
+  };
+}
+
 // ── Active sessions detection ─────────────────────────────
 
 function getActiveSessions() {
@@ -635,6 +744,8 @@ module.exports = {
   getSessionPreview,
   searchFullText,
   getActiveSessions,
+  getSessionReplay,
+  getCostAnalytics,
   CLAUDE_DIR,
   CODEX_DIR,
   HISTORY_FILE,

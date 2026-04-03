@@ -3,7 +3,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const { exec } = require('child_process');
-const { loadSessions, loadSessionDetail, deleteSession, getGitCommits, exportSessionMarkdown, getSessionPreview, searchFullText, getActiveSessions } = require('./data');
+const { loadSessions, loadSessionDetail, deleteSession, getGitCommits, exportSessionMarkdown, getSessionPreview, searchFullText, getActiveSessions, getSessionReplay, getCostAnalytics } = require('./data');
 const { detectTerminals, openInTerminal } = require('./terminals');
 const { getHTML } = require('./html');
 
@@ -125,6 +125,21 @@ function startServer(port, openBrowser = true) {
       const sessions = loadSessions();
       const results = searchFullText(q, sessions);
       json(res, results);
+    }
+
+    // ── Session replay ─────────────────────
+    else if (req.method === 'GET' && pathname.startsWith('/api/replay/')) {
+      const sessionId = pathname.split('/').pop();
+      const project = parsed.searchParams.get('project') || '';
+      const data = getSessionReplay(sessionId, project);
+      json(res, data);
+    }
+
+    // ── Cost analytics ──────────────────────
+    else if (req.method === 'GET' && pathname === '/api/analytics/cost') {
+      const sessions = loadSessions();
+      const data = getCostAnalytics(sessions);
+      json(res, data);
     }
 
     // ── Version check ────────────────────────

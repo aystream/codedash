@@ -686,6 +686,11 @@ function render() {
     return;
   }
 
+  if (currentView === 'analytics') {
+    renderAnalytics(content);
+    return;
+  }
+
   if (currentView === 'starred') {
     var starredSessions = sessions.filter(function(s) { return stars.indexOf(s.id) >= 0; });
     if (starredSessions.length === 0) {
@@ -1019,9 +1024,15 @@ async function openDetail(s) {
 
   // Action buttons
   infoHtml += '<div class="detail-actions">';
-  infoHtml += '<button class="launch-btn" onclick="launchSession(\'' + s.id + '\',\'' + escHtml(s.tool) + '\',\'' + escHtml(s.project || '') + '\')">Resume in Terminal</button>';
+  // Show Focus button for active sessions
+  if (activeSessions[s.id]) {
+    infoHtml += '<button class="launch-btn" style="background:var(--accent-green);color:#000" onclick="focusSession(\'' + s.id + '\')">Focus Terminal</button>';
+  } else {
+    infoHtml += '<button class="launch-btn" onclick="launchSession(\'' + s.id + '\',\'' + escHtml(s.tool) + '\',\'' + escHtml(s.project || '') + '\')">Resume in Terminal</button>';
+  }
   infoHtml += '<button class="launch-btn btn-secondary" onclick="copyResume(\'' + s.id + '\',\'' + escHtml(s.tool) + '\')">Copy Command</button>';
   if (s.has_detail) {
+    infoHtml += '<button class="launch-btn btn-secondary" onclick="closeDetail();openReplay(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\')">Replay</button>';
     infoHtml += '<button class="launch-btn btn-secondary" onclick="exportMd(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\')">Export MD</button>';
   }
   infoHtml += '<button class="star-btn detail-star' + (isStarred ? ' active' : '') + '" onclick="toggleStar(\'' + s.id + '\')">&#9733; ' + (isStarred ? 'Starred' : 'Star') + '</button>';
@@ -1387,6 +1398,225 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 });
+
+// ── Session Replay ────────────────────────────────────────────
+
+async function openReplay(sessionId, project) {
+  var content = document.getElementById('content');
+  content.innerHTML = '<div class="loading">Loading replay...</div>';
+
+  try {
+    var resp = await fetch('/api/replay/' + sessionId + '?project=' + encodeURIComponent(project));
+    var data = await resp.json();
+
+    if (!data.messages || data.messages.length === 0) {
+      content.innerHTML = '<div class="empty-state">No messages to replay.</div>';
+      return;
+    }
+
+    var msgs = data.messages;
+    var html = '<div class="replay-container">';
+    html += '<div class="replay-header">';
+    html += '<button class="launch-btn btn-secondary" onclick="setView(\'sessions\')">Back</button>';
+    html += '<span class="replay-title">Session Replay — ' + sessionId.slice(0, 12) + '</span>';
+    html += '<span class="replay-duration">' + formatDuration(data.duration) + '</span>';
+    html += '</div>';
+
+    // Timeline slider
+    html += '<div class="replay-controls">';
+    html += '<button class="replay-play-btn" id="replayPlayBtn" onclick="toggleReplayPlay()">&#9654;</button>';
+    html += '<input type="range" class="replay-slider" id="replaySlider" min="0" max="' + (msgs.length - 1) + '" value="0" oninput="seekReplay(this.value)">';
+    html += '<span class="replay-counter" id="replayCounter">1 / ' + msgs.length + '</span>';
+    html += '</div>';
+
+    // Messages area
+    html += '<div class="replay-messages" id="replayMessages"></div>';
+    html += '</div>';
+
+    content.innerHTML = html;
+
+    // Store messages for replay
+    window._replayMsgs = msgs;
+    window._replayPos = 0;
+    window._replayPlaying = false;
+    window._replayTimer = null;
+    seekReplay(0);
+  } catch (e) {
+    content.innerHTML = '<div class="empty-state">Failed to load replay.</div>';
+  }
+}
+
+function seekReplay(pos) {
+  pos = parseInt(pos);
+  var msgs = window._replayMsgs;
+  if (!msgs) return;
+  window._replayPos = pos;
+
+  var container = document.getElementById('replayMessages');
+  var slider = document.getElementById('replaySlider');
+  var counter = document.getElementById('replayCounter');
+  if (!container) return;
+
+  var html = '';
+  for (var i = 0; i <= pos && i < msgs.length; i++) {
+    var m = msgs[i];
+    var cls = m.role === 'user' ? 'preview-user' : 'preview-assistant';
+    var label = m.role === 'user' ? 'You' : 'AI';
+    var time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '';
+    var isLatest = i === pos;
+    html += '<div class="replay-msg ' + cls + (isLatest ? ' replay-latest' : '') + '">';
+    html += '<div class="replay-msg-header"><span class="preview-role">' + label + '</span><span class="replay-time">' + time + '</span></div>';
+    html += '<div class="replay-msg-content">' + escHtml(m.content) + '</div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+  container.scrollTop = container.scrollHeight;
+
+  if (slider) slider.value = pos;
+  if (counter) counter.textContent = (pos + 1) + ' / ' + msgs.length;
+}
+
+function toggleReplayPlay() {
+  var btn = document.getElementById('replayPlayBtn');
+  if (window._replayPlaying) {
+    window._replayPlaying = false;
+    clearInterval(window._replayTimer);
+    if (btn) btn.innerHTML = '&#9654;';
+  } else {
+    window._replayPlaying = true;
+    if (btn) btn.innerHTML = '&#9646;&#9646;';
+    window._replayTimer = setInterval(function() {
+      var next = window._replayPos + 1;
+      if (next >= window._replayMsgs.length) {
+        toggleReplayPlay();
+        return;
+      }
+      seekReplay(next);
+    }, 1500);
+  }
+}
+
+function formatDuration(ms) {
+  if (!ms) return '';
+  var s = Math.floor(ms / 1000);
+  var m = Math.floor(s / 60);
+  var h = Math.floor(m / 60);
+  if (h > 0) return h + 'h ' + (m % 60) + 'm';
+  if (m > 0) return m + 'm ' + (s % 60) + 's';
+  return s + 's';
+}
+
+// ── Cost Analytics ────────────────────────────────────────────
+
+async function renderAnalytics(container) {
+  container.innerHTML = '<div class="loading">Loading analytics...</div>';
+
+  try {
+    var resp = await fetch('/api/analytics/cost');
+    var data = await resp.json();
+
+    var html = '<div class="analytics-container">';
+    html += '<h2 class="heatmap-title">Cost Analytics</h2>';
+
+    // Summary cards
+    html += '<div class="analytics-summary">';
+    html += '<div class="analytics-card"><span class="analytics-val">~$' + data.totalCost.toFixed(2) + '</span><span class="analytics-label">Total estimated cost</span></div>';
+    html += '<div class="analytics-card"><span class="analytics-val">' + formatTokens(data.totalTokens) + '</span><span class="analytics-label">Total tokens</span></div>';
+    html += '<div class="analytics-card"><span class="analytics-val">' + data.totalSessions + '</span><span class="analytics-label">Sessions</span></div>';
+    html += '<div class="analytics-card"><span class="analytics-val">~$' + (data.totalCost / Math.max(data.totalSessions, 1)).toFixed(2) + '</span><span class="analytics-label">Avg per session</span></div>';
+    html += '</div>';
+
+    // Cost by day chart (bar chart)
+    var days = Object.keys(data.byDay).sort();
+    var last30 = days.slice(-30);
+    if (last30.length > 0) {
+      var maxCost = Math.max.apply(null, last30.map(function(d) { return data.byDay[d].cost; }));
+      html += '<div class="chart-section"><h3>Daily Cost (last 30 days)</h3>';
+      html += '<div class="bar-chart">';
+      last30.forEach(function(d) {
+        var c = data.byDay[d];
+        var pct = maxCost > 0 ? (c.cost / maxCost * 100) : 0;
+        var label = d.slice(5); // MM-DD
+        html += '<div class="bar-col" title="' + d + ': ~$' + c.cost.toFixed(2) + ' (' + c.sessions + ' sessions)">';
+        html += '<div class="bar-fill" style="height:' + pct + '%"></div>';
+        html += '<div class="bar-label">' + label + '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    // Cost by project (horizontal bars)
+    var projects = Object.entries(data.byProject).sort(function(a, b) { return b[1].cost - a[1].cost; });
+    var topProjects = projects.slice(0, 10);
+    if (topProjects.length > 0) {
+      var maxProjCost = topProjects[0][1].cost;
+      html += '<div class="chart-section"><h3>Cost by Project</h3>';
+      html += '<div class="hbar-chart">';
+      topProjects.forEach(function(entry) {
+        var name = entry[0];
+        var info = entry[1];
+        var pct = maxProjCost > 0 ? (info.cost / maxProjCost * 100) : 0;
+        html += '<div class="hbar-row">';
+        html += '<span class="hbar-name">' + escHtml(name) + '</span>';
+        html += '<div class="hbar-track"><div class="hbar-fill" style="width:' + pct + '%"></div></div>';
+        html += '<span class="hbar-val">~$' + info.cost.toFixed(2) + '</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    // Top expensive sessions
+    if (data.topSessions && data.topSessions.length > 0) {
+      html += '<div class="chart-section"><h3>Most Expensive Sessions</h3>';
+      html += '<div class="top-sessions">';
+      data.topSessions.forEach(function(s) {
+        html += '<div class="top-session-row" onclick="onCardClick(\'' + s.id + '\', event)">';
+        html += '<span class="top-session-cost">~$' + s.cost.toFixed(2) + '</span>';
+        html += '<span class="top-session-project">' + escHtml(s.project) + '</span>';
+        html += '<span class="top-session-date">' + (s.date || '') + '</span>';
+        html += '<span class="top-session-id">' + s.id.slice(0, 8) + '</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state">Failed to load analytics.</div>';
+  }
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+  return String(n);
+}
+
+// ── Focus active session (switch to terminal) ─────────────────
+
+function focusSession(sessionId) {
+  var a = activeSessions[sessionId];
+  if (!a) { showToast('Session not active'); return; }
+
+  // Use osascript via the launch API to focus the terminal window
+  var terminal = localStorage.getItem('codedash-terminal') || '';
+  fetch('/api/launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: sessionId,
+      tool: a.kind === 'codex' ? 'codex' : 'claude',
+      flags: ['focus'],
+      project: a.cwd || '',
+      terminal: terminal,
+    })
+  }).then(function() {
+    showToast('Focused terminal');
+  }).catch(function() {
+    showToast('Could not focus terminal');
+  });
+}
 
 // ── Export/Import dialog ──────────────────────────────────────
 
