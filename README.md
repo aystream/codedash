@@ -1,73 +1,66 @@
 # CodeDash
 
-Браузерный дашборд для сессий Claude Code и Codex. Смотри, ищи, возобновляй и управляй всеми своими AI-сессиями.
+Browser dashboard for Claude Code & Codex sessions. View, search, resume, and manage all your AI coding sessions.
+
+[Russian / Русский](docs/README_RU.md) | [Chinese / 中文](docs/README_ZH.md)
 
 https://github.com/user-attachments/assets/15c45659-365b-49f8-86a3-9005fa155ca6
 
 ![npm](https://img.shields.io/npm/v/codedash-app?style=flat-square) ![Node](https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square) ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
-## Быстрый старт
+## Quick Start
 
 ```bash
 npx codedash-app run
 ```
 
-Откроется `http://localhost:3847` в браузере.
+Opens `http://localhost:3847` in your browser.
 
 ```bash
-npx codedash-app run --port=4000    # свой порт
-npx codedash-app run --no-browser   # без авто-открытия
-npx codedash-app list               # список сессий в терминале
-npx codedash-app stats              # статистика
+npx codedash-app run --port=4000    # custom port
+npx codedash-app run --no-browser   # don't auto-open
+npx codedash-app list               # list sessions in terminal
+npx codedash-app stats              # show statistics
 ```
 
-## Возможности
+## Features
 
-**Сессии**
-- Grid и List вид с группировкой по проектам
-- Trigram нечёткий поиск по содержимому и проектам (опечатки не страшны)
-- Фильтры по инструменту (Claude/Codex), тегам, диапазону дат
-- Звёздочки/закрепление важных сессий (всегда вверху списка)
-- Теги: bug, feature, research, infra, deploy, review
-- Heatmap активности в стиле GitHub
-- Оценка стоимости сессии
+**Sessions**
+- Grid and List view with project grouping
+- Trigram fuzzy search across session content and projects
+- Filter by tool (Claude/Codex), tags, date range
+- Star/pin important sessions (always shown first)
+- Tag sessions: bug, feature, research, infra, deploy, review
+- Activity heatmap (GitHub-style)
+- Cost estimation per session
 
-**Запуск**
-- Возобновление сессий в iTerm2, Terminal.app, Warp, Kitty, Alacritty
-- Авто `cd` в директорию проекта перед запуском
-- Копирование команды resume в буфер обмена
-- Выбор терминала сохраняется между сессиями
+**Launch**
+- Resume sessions in iTerm2, Terminal.app, Warp, Kitty, Alacritty
+- Auto `cd` into the correct project directory
+- Copy resume command to clipboard
+- Terminal preference saved between sessions
 
-**Управление**
-- Удаление сессий (файл + история + env)
-- Массовое выделение и удаление
-- Экспорт переписки в Markdown
-- Связанные git-коммиты для каждой сессии
-- Авто-проверка обновлений
+**Manage**
+- Delete sessions (file + history + env cleanup)
+- Bulk select and delete
+- Export conversations as Markdown
+- Related git commits shown per session
+- Auto-update notifications
 
-**Темы**
-- Dark (по умолчанию), Light, System
+**Themes**: Dark (default), Light, System
 
-**Горячие клавиши**
-- `/` поиск, `j/k` навигация, `Enter` открыть
-- `x` звезда, `d` удалить, `s` режим выделения, `g` группировка
-- `r` обновить, `Escape` закрыть панели
+**Keyboard Shortcuts**: `/` search, `j/k` navigate, `Enter` open, `x` star, `d` delete, `s` select, `g` group, `r` refresh, `Esc` close
 
-## Как работает
+## How It Works
 
-Читает данные сессий из `~/.claude/` и `~/.codex/`:
-- `history.jsonl` — индекс сессий
-- `projects/*/<session-id>.jsonl` — данные переписки
-- `sessions/` — файлы сессий Codex
+Reads session data from `~/.claude/` and `~/.codex/`. Zero dependencies. Everything runs on `localhost`.
 
-Ноль зависимостей. Всё работает на `localhost`.
-
-## Требования
+## Requirements
 
 - Node.js >= 16
-- Claude Code или Codex CLI
+- Claude Code or Codex CLI
 - macOS / Linux / Windows
 
-## Лицензия
+## License
 
 MIT

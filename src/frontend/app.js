@@ -602,10 +602,16 @@ function renderProjects(container, sessions) {
 
 // ── Activity Heatmap ───────────────────────────────────────────
 
+function localISO(date) {
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
 function renderHeatmap(container) {
   var now = new Date();
-  var oneYearAgo = new Date(now);
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  var oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
 
   // Count sessions per day
   var counts = {};
@@ -615,17 +621,16 @@ function renderHeatmap(container) {
     counts[d] = (counts[d] || 0) + 1;
   });
 
-  // Build day array for last 365 days
+  // Build day array — start from Sunday before oneYearAgo, end on Saturday after today
   var days = [];
   var d = new Date(oneYearAgo);
-  // Start from the most recent Sunday before or on oneYearAgo
-  d.setDate(d.getDate() - d.getDay());
+  d.setDate(d.getDate() - d.getDay()); // align to Sunday
 
   var endDate = new Date(now);
-  endDate.setDate(endDate.getDate() + (6 - endDate.getDay())); // end on Saturday
+  endDate.setDate(endDate.getDate() + (6 - endDate.getDay())); // align to Saturday
 
   while (d <= endDate) {
-    var iso = d.toISOString().slice(0, 10);
+    var iso = localISO(d);
     var count = counts[iso] || 0;
     var level = 0;
     if (count >= 6) level = 4;
@@ -633,8 +638,7 @@ function renderHeatmap(container) {
     else if (count >= 2) level = 2;
     else if (count >= 1) level = 1;
     days.push({ date: iso, count: count, level: level, day: d.getDay() });
-    d = new Date(d);
-    d.setDate(d.getDate() + 1);
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
   }
 
   // Build weeks (columns)
@@ -682,10 +686,10 @@ function renderHeatmap(container) {
   var streak = 0;
   var checkDate = new Date(now);
   while (true) {
-    var iso = checkDate.toISOString().slice(0, 10);
-    if (counts[iso] && counts[iso] > 0) {
+    var ciso = localISO(checkDate);
+    if (counts[ciso] && counts[ciso] > 0) {
       streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
+      checkDate = new Date(checkDate.getFullYear(), checkDate.getMonth(), checkDate.getDate() - 1);
     } else {
       break;
     }
