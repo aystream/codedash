@@ -829,7 +829,7 @@ function launchSession(sessionId, tool, project) {
 
 function copyResume(sessionId, tool) {
   var cmd = tool === 'codex'
-    ? 'codex --resume ' + sessionId
+    ? 'codex resume ' + sessionId
     : 'claude --resume ' + sessionId;
   navigator.clipboard.writeText(cmd).then(function() {
     showToast('Copied: ' + cmd);
@@ -1099,12 +1099,44 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// ── Update check ──────────────────────────────────────────────
+
+async function checkForUpdates() {
+  try {
+    var resp = await fetch('/api/version');
+    var data = await resp.json();
+    if (data.updateAvailable) {
+      var banner = document.getElementById('updateBanner');
+      var text = document.getElementById('updateText');
+      if (banner && text) {
+        text.textContent = 'Update available: v' + data.current + ' → v' + data.latest;
+        banner.style.display = 'flex';
+        banner.dataset.cmd = 'npm update -g codedash-app && codedash run';
+      }
+    }
+  } catch {}
+}
+
+function copyUpdate() {
+  var banner = document.getElementById('updateBanner');
+  var cmd = banner ? banner.dataset.cmd : 'npm update -g codedash-app';
+  navigator.clipboard.writeText(cmd).then(function() {
+    showToast('Copied: ' + cmd);
+  });
+}
+
+function dismissUpdate() {
+  var banner = document.getElementById('updateBanner');
+  if (banner) banner.style.display = 'none';
+}
+
 // ── Initialization ─────────────────────────────────────────────
 
 (function init() {
   // Load data
   loadSessions();
   loadTerminals();
+  checkForUpdates();
 
   // Apply saved theme
   var savedTheme = localStorage.getItem('codedash-theme') || 'dark';

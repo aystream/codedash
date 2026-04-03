@@ -1,5 +1,6 @@
 // HTTP server + API routes
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const { exec } = require('child_process');
 const { loadSessions, loadSessionDetail, deleteSession, getGitCommits, exportSessionMarkdown } = require('./data');
@@ -103,6 +104,18 @@ function startServer(port, openBrowser = true) {
       json(res, commits);
     }
 
+    // ── Version check ────────────────────────
+    else if (req.method === 'GET' && pathname === '/api/version') {
+      const pkg = require('../package.json');
+      const current = pkg.version;
+      // Fetch latest from npm registry
+      fetchLatestVersion(pkg.name).then(latest => {
+        json(res, { current, latest, updateAvailable: latest && latest !== current && isNewer(latest, current) });
+      }).catch(() => {
+        json(res, { current, latest: null, updateAvailable: false });
+      });
+    }
+
     // ── 404 ─────────────────────────────────
     else {
       res.writeHead(404);
@@ -137,6 +150,31 @@ function readBody(req, cb) {
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => cb(body));
+}
+
+// ── npm version check ───────────────────
+function fetchLatestVersion(packageName) {
+  return new Promise((resolve, reject) => {
+    https.get(`https://registry.npmjs.org/${packageName}/latest`, { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data).version);
+        } catch { reject(); }
+      });
+    }).on('error', reject);
+  });
+}
+
+function isNewer(latest, current) {
+  const l = latest.split('.').map(Number);
+  const c = current.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((l[i] || 0) > (c[i] || 0)) return true;
+    if ((l[i] || 0) < (c[i] || 0)) return false;
+  }
+  return false;
 }
 
 module.exports = { startServer };

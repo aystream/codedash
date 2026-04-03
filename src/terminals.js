@@ -70,7 +70,7 @@ function openInTerminal(sessionId, tool, flags, projectDir, terminalId) {
   let cmd;
 
   if (tool === 'codex') {
-    cmd = `codex --resume ${sessionId}`;
+    cmd = `codex resume ${sessionId}`;
   } else {
     cmd = `claude --resume ${sessionId}`;
     if (skipPerms) cmd += ' --dangerously-skip-permissions';
