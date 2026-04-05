@@ -169,7 +169,7 @@ function focusTerminalByPid(pid) {
       const ttyOut = execSync(`ps -p ${pid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
       if (!ttyOut) throw new Error('no tty');
 
-      // Try iTerm2 first — activate and select session by tty
+      // Try iTerm2 first — activate and select the right tab/window by tty
       try {
         const script = `
           tell application "iTerm"
@@ -177,14 +177,17 @@ function focusTerminalByPid(pid) {
             repeat with w in windows
               repeat with t in tabs of w
                 repeat with s in sessions of t
-                  if tty of s contains "${ttyOut}" then
-                    select t
-                    return
+                  set sessionTTY to tty of s
+                  if sessionTTY contains "${ttyOut}" or "${ttyOut}" contains sessionTTY then
+                    select w
+                    tell w to select t
+                    return "found"
                   end if
                 end repeat
               end repeat
             end repeat
           end tell
+          return "not found"
         `;
         execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { stdio: 'pipe', timeout: 3000 });
         return true;
