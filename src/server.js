@@ -286,6 +286,66 @@ function startServer(port, openBrowser = true) {
       json(res, data);
     }
 
+    // ── LLM Config ────────────────────────────
+    else if (req.method === 'GET' && pathname === '/api/llm-config') {
+      const config = loadLLMConfig();
+      json(res, config);
+    }
+
+    else if (req.method === 'POST' && pathname === '/api/llm-config') {
+      readBody(req, body => {
+        try {
+          const config = JSON.parse(body);
+          saveLLMConfig(config);
+          log('LLM', 'config saved', { model: config.model, url: config.url });
+          json(res, { ok: true });
+        } catch (e) {
+          json(res, { ok: false, error: e.message }, 400);
+        }
+      });
+    }
+
+    // ── Generate Title ──────────────────────────
+    else if (req.method === 'POST' && pathname === '/api/generate-title') {
+      readBody(req, body => {
+        try {
+          const { sessionId, project } = JSON.parse(body);
+          log('LLM', `generate-title session=${sessionId}`);
+          const config = loadLLMConfig();
+          if (!config.url || !config.apiKey) {
+            json(res, { ok: false, error: 'LLM not configured. Set URL and API key in Settings.' }, 400);
+            return;
+          }
+          const detail = loadSessionDetail(sessionId, project || '');
+          const msgs = detail.messages || [];
+          // Take first 10 + last 10 (deduped)
+          const first10 = msgs.slice(0, 10);
+          const last10 = msgs.slice(-10);
+          const seen = new Set();
+          const sample = [];
+          for (const m of first10.concat(last10)) {
+            const key = (m.uuid || '') + (m.role || '') + (m.content || '').slice(0, 50);
+            if (!seen.has(key)) { seen.add(key); sample.push(m); }
+          }
+          const conversation = sample.map(function(m) {
+            var text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            if (text.length > 300) text = text.slice(0, 300) + '...';
+            return (m.role === 'user' ? 'User' : 'Assistant') + ': ' + text;
+          }).join('\n\n');
+
+          callLLM(config, conversation, msgs.length).then(function(title) {
+            log('LLM', `title generated: "${title}"`);
+            json(res, { ok: true, title: title });
+          }).catch(function(e) {
+            log('ERROR', `LLM call failed: ${e.message}`);
+            json(res, { ok: false, error: e.message }, 500);
+          });
+        } catch (e) {
+          json(res, { ok: false, error: e.message }, 400);
+        }
+      });
+    }
+
     // ── Changelog ─────────────────────────────
     else if (req.method === 'GET' && pathname === '/api/changelog') {
       json(res, CHANGELOG);
@@ -362,6 +422,99 @@ function isNewer(latest, current) {
     if ((l[i] || 0) < (c[i] || 0)) return false;
   }
   return false;
+}
+
+// ── LLM Config ─────────────────────────────
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const LLM_CONFIG_FILE = path.join(os.homedir(), '.claude', 'codedash-llm.json');
+
+function loadLLMConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(LLM_CONFIG_FILE, 'utf8'));
+  } catch {
+    return { model: '', url: '', apiKey: '' };
+  }
+}
+
+function saveLLMConfig(config) {
+  const dir = path.dirname(LLM_CONFIG_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(LLM_CONFIG_FILE, JSON.stringify({
+    model: config.model || '',
+    url: config.url || '',
+    apiKey: config.apiKey || '',
+  }, null, 2));
+}
+
+function callLLM(config, conversation, totalMessages) {
+  return new Promise((resolve, reject) => {
+    const prompt = `You are a helpful assistant that generates concise session titles.
+
+Given a coding session conversation (first and last messages from ${totalMessages} total), generate a short descriptive title (3-8 words) that captures the main topic/task.
+
+Conversation:
+${conversation}`;
+
+    const body = JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: 'Generate a concise title for this coding session. Respond with JSON: {"title": "your title here"}' },
+        { role: 'user', content: prompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 100,
+      temperature: 0.3,
+    });
+
+    const parsed = new URL(config.url);
+    const isHttps = parsed.protocol === 'https:';
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (isHttps ? 443 : 80),
+      path: (parsed.pathname.replace(/\/+$/, '')) + '/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+      timeout: 30000,
+    };
+
+    const mod = isHttps ? https : http;
+    const req = mod.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result.error) {
+            reject(new Error(result.error.message || JSON.stringify(result.error)));
+            return;
+          }
+          const content = result.choices[0].message.content;
+          let title;
+          try {
+            title = JSON.parse(content).title;
+          } catch {
+            // Fallback: use raw content if not valid JSON
+            title = content.replace(/["\n]/g, '').trim();
+          }
+          resolve(title || 'Untitled session');
+        } catch (e) {
+          reject(new Error('Failed to parse LLM response: ' + data.slice(0, 200)));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('LLM request timeout')); });
+    req.write(body);
+    req.end();
+  });
 }
 
 module.exports = { startServer };

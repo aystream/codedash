@@ -23,6 +23,8 @@ let activeSessions = {}; // sessionId -> {status, cpu, memoryMB, pid}
 // Persisted in localStorage
 let stars = JSON.parse(localStorage.getItem('codedash-stars') || '[]');
 let tags = JSON.parse(localStorage.getItem('codedash-tags') || '{}');
+let sessionTitles = JSON.parse(localStorage.getItem('codedash-titles') || '{}');
+let showAITitles = localStorage.getItem('codedash-ai-titles') !== 'false';
 
 // ── Color palette for projects ─────────────────────────────────
 
@@ -156,6 +158,103 @@ function toggleStar(id) {
   else stars.push(id);
   localStorage.setItem('codedash-stars', JSON.stringify(stars));
   render();
+}
+
+// ── AI Titles ─────────────────────────────────────────────────
+
+function toggleAITitles(checked) {
+  showAITitles = checked;
+  localStorage.setItem('codedash-ai-titles', checked ? 'true' : 'false');
+  render();
+}
+
+function openLLMSettings() {
+  document.getElementById('llmSettingsOverlay').style.display = 'flex';
+  fetch('/api/llm-config').then(function(r) { return r.json(); }).then(function(c) {
+    document.getElementById('llmUrl').value = c.url || '';
+    document.getElementById('llmApiKey').value = c.apiKey || '';
+    document.getElementById('llmModel').value = c.model || '';
+  });
+}
+
+function closeLLMSettings() {
+  document.getElementById('llmSettingsOverlay').style.display = 'none';
+}
+
+function saveLLMSettings() {
+  var config = {
+    url: document.getElementById('llmUrl').value.trim(),
+    apiKey: document.getElementById('llmApiKey').value.trim(),
+    model: document.getElementById('llmModel').value.trim(),
+  };
+  fetch('/api/llm-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  }).then(function() {
+    closeLLMSettings();
+    showToast('LLM settings saved');
+  });
+}
+
+function testLLMConnection() {
+  // Generate title for the first available session as a test
+  var testSession = allSessions.find(function(s) { return s.has_detail && s.messages > 2; });
+  if (!testSession) { showToast('No sessions to test with'); return; }
+  showToast('Testing LLM connection...');
+  fetch('/api/generate-title', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: testSession.id, project: testSession.project }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      showToast('OK: "' + d.title + '"');
+    } else {
+      showToast('Error: ' + d.error);
+    }
+  }).catch(function(e) { showToast('Connection failed: ' + e.message); });
+}
+
+function generateTitle(sessionId, project) {
+  fetch('/api/generate-title', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: sessionId, project: project }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok && d.title) {
+      sessionTitles[sessionId] = d.title;
+      localStorage.setItem('codedash-titles', JSON.stringify(sessionTitles));
+      render();
+    } else {
+      showToast('Title generation failed: ' + (d.error || 'unknown'));
+    }
+  }).catch(function(e) { showToast('Error: ' + e.message); });
+}
+
+function generateAllTitles() {
+  var sessions = filteredSessions.filter(function(s) {
+    return s.has_detail && s.messages > 2 && !sessionTitles[s.id];
+  }).slice(0, 20); // batch of 20
+  if (!sessions.length) { showToast('All sessions already have titles'); return; }
+  showToast('Generating titles for ' + sessions.length + ' sessions...');
+  var done = 0;
+  sessions.forEach(function(s) {
+    fetch('/api/generate-title', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: s.id, project: s.project }),
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      done++;
+      if (d.ok && d.title) {
+        sessionTitles[s.id] = d.title;
+        localStorage.setItem('codedash-titles', JSON.stringify(sessionTitles));
+      }
+      if (done === sessions.length) {
+        render();
+        showToast('Generated ' + done + ' titles');
+      }
+    }).catch(function() { done++; });
+  });
 }
 
 // ── Data loading ───────────────────────────────────────────────
@@ -453,7 +552,8 @@ function renderCard(s, idx) {
   var costStr = cost > 0 ? '~$' + cost.toFixed(2) : '';
   var projName = getProjectName(s.project);
   var projColor = getProjectColor(projName);
-  var toolClass = s.tool === 'codex' ? 'tool-codex' : s.tool === 'opencode' ? 'tool-opencode' : s.tool === 'kiro' ? 'tool-kiro' : s.tool === 'cursor' ? 'tool-cursor' : 'tool-claude';
+  var toolClass = 'tool-' + s.tool;
+  var toolLabel = s.tool === 'claude-ext' ? 'claude ext' : s.tool;
 
   var classes = 'card';
   if (isSelected) classes += ' selected';
@@ -468,7 +568,7 @@ function renderCard(s, idx) {
   var html = '<div class="' + classes + '" data-id="' + s.id + '" onclick="onCardClick(\'' + s.id + '\', event)">';
   html += '<div class="card-top">';
   html += '<input type="checkbox" class="card-checkbox" style="' + checkboxStyle + '" ' + (isSelected ? 'checked' : '') + ' onclick="toggleSelect(\'' + s.id + '\', event)">';
-  html += '<span class="tool-badge ' + toolClass + '">' + escHtml(s.tool) + '</span>';
+  html += '<span class="tool-badge ' + toolClass + '">' + escHtml(toolLabel) + '</span>';
   html += '<span class="card-project" style="color:' + projColor + '">' + escHtml(projName) + '</span>';
   html += '<span class="card-time">' + timeAgo(s.last_ts) + '</span>';
   if (costStr) {
@@ -476,7 +576,13 @@ function renderCard(s, idx) {
   }
   html += '<button class="star-btn' + (isStarred ? ' active' : '') + '" onclick="event.stopPropagation();toggleStar(\'' + s.id + '\')" title="Star">&#9733;</button>';
   html += '</div>';
-  html += '<div class="card-body">' + escHtml((s.first_message || '').slice(0, 120)) + '</div>';
+  var aiTitle = showAITitles && sessionTitles[s.id];
+  if (aiTitle) {
+    html += '<div class="card-title">' + escHtml(aiTitle) + '</div>';
+    html += '<div class="card-body card-body-sub">' + escHtml((s.first_message || '').slice(0, 80)) + '</div>';
+  } else {
+    html += '<div class="card-body">' + escHtml((s.first_message || '').slice(0, 120)) + '</div>';
+  }
   html += '<div class="card-footer">';
   html += '<span class="card-meta">' + s.messages + ' msgs</span>';
   if (s.file_size) {
@@ -489,6 +595,9 @@ function renderCard(s, idx) {
   html += '<button class="tag-add-btn" onclick="showTagDropdown(event, \'' + s.id + '\')" title="Add tag">+</button>';
   html += '</span>';
   if (s.has_detail) {
+    if (!sessionTitles[s.id]) {
+      html += '<button class="card-gen-btn" onclick="event.stopPropagation();generateTitle(\'' + s.id + '\',\'' + escHtml(s.project || '').replace(/'/g, "\\'") + '\')" title="Generate AI title">&#9883;</button>';
+    }
     html += '<button class="card-expand-btn" onclick="event.stopPropagation();toggleExpand(\'' + s.id + '\',\'' + escHtml(s.project || '').replace(/'/g, "\\'") + '\',this)" title="Preview messages">&#9662;</button>';
   }
   html += '</div>';
@@ -524,7 +633,8 @@ function renderListCard(s, idx) {
   if (isFocused) classes += ' focused';
 
   var html = '<div class="' + classes + '" data-id="' + s.id + '" onclick="onCardClick(\'' + s.id + '\', event)">';
-  html += '<span class="tool-badge tool-' + s.tool + '">' + escHtml(s.tool) + '</span>';
+  var listToolLabel = s.tool === 'claude-ext' ? 'claude ext' : s.tool;
+  html += '<span class="tool-badge tool-' + s.tool + '">' + escHtml(listToolLabel) + '</span>';
   html += '<span class="list-project" style="color:' + projColor + '">' + escHtml(projName) + '</span>';
   html += '<span class="list-msg">' + escHtml((s.first_message || '').slice(0, 80)) + '</span>';
   html += '<span class="list-meta">' + s.messages + ' msgs</span>';
@@ -1114,7 +1224,15 @@ async function openDetail(s) {
   var terminal = localStorage.getItem('codedash-terminal') || '';
 
   var infoHtml = '<div class="detail-info">';
-  infoHtml += '<div class="detail-row"><span class="detail-label">Tool</span><span class="tool-badge tool-' + s.tool + '">' + escHtml(s.tool) + '</span></div>';
+  // AI Title row
+  var aiTitle = sessionTitles[s.id];
+  if (aiTitle) {
+    infoHtml += '<div class="detail-row"><span class="detail-label">AI Title</span><span style="font-weight:600">' + escHtml(aiTitle) + '</span></div>';
+  } else if (s.has_detail) {
+    infoHtml += '<div class="detail-row"><span class="detail-label">AI Title</span><button class="toolbar-btn" style="font-size:11px;padding:2px 8px" onclick="generateTitle(\'' + s.id + '\',\'' + escHtml(s.project || '').replace(/'/g, "\\'") + '\')">Generate</button></div>';
+  }
+  var detailToolLabel = s.tool === 'claude-ext' ? 'claude ext' : s.tool;
+  infoHtml += '<div class="detail-row"><span class="detail-label">Tool</span><span class="tool-badge tool-' + s.tool + '">' + escHtml(detailToolLabel) + '</span></div>';
   infoHtml += '<div class="detail-row"><span class="detail-label">Project</span><span>' + escHtml(s.project_short || s.project || '') + '</span></div>';
   infoHtml += '<div class="detail-row"><span class="detail-label">Session ID</span><span class="mono">' + escHtml(s.id) + '</span></div>';
   infoHtml += '<div class="detail-row"><span class="detail-label">First seen</span><span>' + escHtml(s.first_time || '') + '</span></div>';
@@ -2072,4 +2190,8 @@ function dismissUpdate() {
   // Set group button state
   var groupBtn = document.getElementById('groupBtn');
   if (groupBtn) groupBtn.classList.toggle('active', grouped);
+
+  // Set AI titles toggle
+  var aiToggle = document.getElementById('aiTitlesToggle');
+  if (aiToggle) aiToggle.checked = showAITitles;
 })();

@@ -974,6 +974,15 @@ body {
     flex-wrap: wrap;
 }
 
+.card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.4;
+    margin-bottom: 2px;
+    word-break: break-word;
+}
+
 .card-body {
     font-size: 13px;
     color: var(--text-primary);
@@ -982,6 +991,12 @@ body {
     margin-bottom: 8px;
     flex: unset;
     min-width: unset;
+}
+
+.card-body-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
 }
 
 .card-footer {
@@ -1560,6 +1575,21 @@ body {
 }
 
 /* ── Card expand preview ────────────────────────────────────── */
+
+.card-gen-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 1px 5px;
+    transition: all 0.15s;
+}
+.card-gen-btn:hover {
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+}
 
 .card-expand-btn {
     background: none;
