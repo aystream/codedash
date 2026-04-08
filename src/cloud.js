@@ -116,8 +116,13 @@ function cloudRequest(method, reqPath, token, body, headers) {
 // ── Session Serialization ────────────────────
 
 function serializeSession(sessionId, sessions) {
-  // Find session in loaded sessions
-  const session = sessions[sessionId];
+  // Find session in loaded sessions (sessions can be array or object)
+  let session;
+  if (Array.isArray(sessions)) {
+    session = sessions.find(s => s.id === sessionId);
+  } else {
+    session = sessions[sessionId];
+  }
   if (!session) return null;
 
   const { loadSessionDetail, findSessionFile } = require('./data');
@@ -382,18 +387,18 @@ async function cloudCLI(args) {
 
     const { loadSessions } = require('./data');
     const sessions = loadSessions();
+    const sessionIds = Array.isArray(sessions) ? sessions.map(s => s.id) : Object.keys(sessions);
     const target = args[1];
 
     if (target === '--all') {
-      const ids = Object.keys(sessions);
-      console.log(`\n  Uploading ${ids.length} sessions...\n`);
+      console.log(`\n  Uploading ${sessionIds.length} sessions...\n`);
       let ok = 0, skip = 0, fail = 0;
-      for (const id of ids) {
+      for (const id of sessionIds) {
         const result = await pushOne(id, sessions, key, profile.token);
         if (result === 'ok') ok++;
         else if (result === 'skip') skip++;
         else fail++;
-        process.stdout.write(`\r  Progress: ${ok + skip + fail}/${ids.length} (${ok} uploaded, ${skip} skipped, ${fail} failed)`);
+        process.stdout.write(`\r  Progress: ${ok + skip + fail}/${sessionIds.length} (${ok} uploaded, ${skip} skipped, ${fail} failed)`);
       }
       console.log(`\n\n  Done: ${ok} uploaded, ${skip} unchanged, ${fail} failed\n`);
       return;
@@ -405,7 +410,7 @@ async function cloudCLI(args) {
     }
 
     // Find session by prefix match
-    const match = Object.keys(sessions).find(id => id.startsWith(target));
+    const match = sessionIds.find(id => id.startsWith(target));
     if (!match) {
       console.error(`  Session not found: ${target}\n`);
       process.exit(1);
