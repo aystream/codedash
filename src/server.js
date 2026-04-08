@@ -564,6 +564,13 @@ async function handleCloudProxy(req, res, pathname) {
     });
   }
 
+  // POST /api/cloud/lock — clear cached key
+  if (req.method === 'POST' && pathname === '/api/cloud/lock') {
+    _cachedCloudKey = null;
+    json(res, { ok: true });
+    return;
+  }
+
   // POST /api/cloud/unlock — cache encryption key from passphrase
   if (req.method === 'POST' && pathname === '/api/cloud/unlock') {
     return new Promise((resolve) => {
@@ -583,8 +590,20 @@ async function handleCloudProxy(req, res, pathname) {
   // GET /api/cloud/locked — check if key is cached
   if (req.method === 'GET' && pathname === '/api/cloud/locked') {
     const keyData = loadCloudKey();
+    const localConfigured = !!(keyData && keyData.salt);
+
+    // Also check if server has a salt (another device set it up)
+    let serverHasSalt = false;
+    if (!localConfigured) {
+      try {
+        const verifyRes = await cloudApiRequest('POST', '/api/auth/verify', profile.token);
+        serverHasSalt = !!(verifyRes.status === 200 && verifyRes.data?.user?.encryption_salt);
+      } catch {}
+    }
+
     json(res, {
-      configured: !!(keyData && keyData.salt),
+      configured: localConfigured,
+      serverHasSalt: serverHasSalt,
       unlocked: !!_cachedCloudKey,
     });
     return;
